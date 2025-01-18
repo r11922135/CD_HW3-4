@@ -9,6 +9,8 @@ Yunseo Park 0510172
 #include <utility>
 #include <vector>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 
 // LLVM
 #include "llvm/Passes/PassBuilder.h"
@@ -30,21 +32,23 @@ public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
     // TODO
     // Map for in[I] and out[I] for each Instruction
-    std::map<Instruction*, std::set<Value*>> inSets;
-    std::map<Instruction*, std::set<Value*>> outSets;
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> inSets;
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> outSets;
 
     // Compute gen[I] and kill[I] for each Instruction
-    std::map<Instruction*, std::set<Value*>> genSets;
-    std::map<Instruction*, std::set<Value*>> killSets;
+    // gen[I] = {variables declared but not initialized}
+    // kill[I] = {variables assigned a value}
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> genSets;
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> killSets;
 
     // Set to track used but uninitialized variables
-    std::set<Value*> uninitializedVariables;
+    std::unordered_set<Value*> uninitializedVariables;
 
     // Initialize gen and kill sets for instructions
     for (auto &BB : F) {
       for (auto &I : BB) {
-        std::set<Value*> gen;
-        std::set<Value*> kill;
+        std::unordered_set<Value*> gen;
+        std::unordered_set<Value*> kill;
 
         if (auto *AI = dyn_cast<AllocaInst>(&I)) {
           // If variable is declared but not initialized yet
@@ -54,7 +58,6 @@ public:
         else if (auto *SI = dyn_cast<StoreInst>(&I)) {
           Value *var = SI->getPointerOperand();
           kill.insert(var);
-          //gen.erase(var); // Initialization removes from gen
         }
 
         genSets[&I] = gen;
@@ -77,7 +80,7 @@ public:
       for (auto &BB : F) {
         for (auto &I : BB) {
           Instruction *inst = &I;
-          std::set<Value*> newIn;
+          std::unordered_set<Value*> newIn;
 
           // For the first instruction in a basic block, consider predecessors
           if (inst == &BB.front()) {
@@ -95,9 +98,13 @@ public:
           }
 
           // Compute out[I]: gen[I] union (in[I] - kill[I])
-          std::set<Value*> newOut = genSets[inst];
-          std::set<Value*> diff;
-          std::set_difference(newIn.begin(), newIn.end(), killSets[inst].begin(), killSets[inst].end(), std::inserter(diff, diff.end()));
+          std::unordered_set<Value*> newOut = genSets[inst];
+          std::unordered_set<Value*> diff;
+          for (const auto &val : newIn) {
+            if (killSets[inst].find(val) == killSets[inst].end()) {
+              diff.insert(val);
+            }
+          }
           newOut.insert(diff.begin(), diff.end());
 
           // Check if in or out changed
@@ -139,31 +146,31 @@ public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
     // TODO
     // Map for in[I] and out[I] for each Instruction
-    std::map<Instruction*, std::set<Value*>> inSets;
-    std::map<Instruction*, std::set<Value*>> outSets;
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> inSets;
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> outSets;
 
     // Compute gen[I] and kill[I] for each Instruction
-    std::map<Instruction*, std::set<Value*>> genSets;
-    std::map<Instruction*, std::set<Value*>> killSets;
+    // gen[I] = {variables declared but not initialized}
+    // kill[I] = {variables assigned a value}
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> genSets;
+    std::unordered_map<Instruction*, std::unordered_set<Value*>> killSets;
 
     // Set to track used but uninitialized variables
-    std::set<Value*> uninitializedVariables;
+    std::unordered_set<Value*> uninitializedVariables;
 
     // Initialize gen and kill sets for instructions
     for (auto &BB : F) {
       for (auto &I : BB) {
-        std::set<Value*> gen;
-        std::set<Value*> kill;
+        std::unordered_set<Value*> gen;
+        std::unordered_set<Value*> kill;
 
         if (auto *AI = dyn_cast<AllocaInst>(&I)) {
           // If variable is declared but not initialized yet
           gen.insert(AI);
         }
-
         else if (auto *SI = dyn_cast<StoreInst>(&I)) {
           Value *var = SI->getPointerOperand();
           kill.insert(var);
-          //gen.erase(var); // Initialization removes from gen
         }
 
         genSets[&I] = gen;
@@ -186,7 +193,7 @@ public:
       for (auto &BB : F) {
         for (auto &I : BB) {
           Instruction *inst = &I;
-          std::set<Value*> newIn;
+          std::unordered_set<Value*> newIn;
 
           // For the first instruction in a basic block, consider predecessors
           if (inst == &BB.front()) {
@@ -204,9 +211,13 @@ public:
           }
 
           // Compute out[I]: gen[I] union (in[I] - kill[I])
-          std::set<Value*> newOut = genSets[inst];
-          std::set<Value*> diff;
-          std::set_difference(newIn.begin(), newIn.end(), killSets[inst].begin(), killSets[inst].end(), std::inserter(diff, diff.end()));
+          std::unordered_set<Value*> newOut = genSets[inst];
+          std::unordered_set<Value*> diff;
+          for (const auto &val : newIn) {
+            if (killSets[inst].find(val) == killSets[inst].end()) {
+              diff.insert(val);
+            }
+          }
           newOut.insert(diff.begin(), diff.end());
 
           // Check if in or out changed
@@ -230,29 +241,32 @@ public:
         }
       }
     }
-    // Step 4: Traverse instructions and insert initialization immediately after declaration
+
+    // Traverse instructions and insert initialization immediately after declaration
     for (auto &BB : F) {
       for (auto &I : BB) {
-        if (auto *AI = dyn_cast<AllocaInst>(&I)) {
-          Value *var = &I;
-          if (uninitializedVariables.count(var)) {
-            IRBuilder<> builder(AI->getNextNode()); // Insert after declaration
-            Value *initialValue = nullptr;
+        auto *AI = dyn_cast<AllocaInst>(&I);
+        if (!AI) continue;
 
-            if (var->getType()->isPointerTy()) {
-              Type *elemType = var->getType()->getPointerElementType();
-              if (elemType->isIntegerTy()) {
-                initialValue = ConstantInt::get(elemType, 10);
-              } else if (elemType->isFloatTy()) {
-                initialValue = ConstantFP::get(elemType, 20.0);
-              } else if (elemType->isDoubleTy()) {
-                initialValue = ConstantFP::get(elemType, 30.0);
-              }
-              if (initialValue) {
-                builder.CreateStore(initialValue, AI);
-              }
-            }
-          }
+        Value *var = &I;
+        if (!uninitializedVariables.count(var)) continue;
+
+        IRBuilder<> builder(AI->getNextNode()); // Insert after declaration
+        Value *initialValue = nullptr;
+
+        if (!var->getType()->isPointerTy()) continue;
+
+        Type *elemType = var->getType()->getPointerElementType();
+        if (elemType->isIntegerTy()) {
+          initialValue = ConstantInt::get(elemType, 10);
+        } else if (elemType->isFloatTy()) {
+          initialValue = ConstantFP::get(elemType, 20.0);
+        } else if (elemType->isDoubleTy()) {
+          initialValue = ConstantFP::get(elemType, 30.0);
+        }
+
+        if (initialValue) {
+          builder.CreateStore(initialValue, AI);
         }
       }
     }
