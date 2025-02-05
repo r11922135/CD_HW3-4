@@ -1,0 +1,7 @@
+p34.so
+*.o
+*.bc
+*.ll
+*_fix.bc
+
+results/
